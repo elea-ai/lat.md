@@ -43,6 +43,7 @@ Wiki links can point to any file or folder in the project, and — for supported
 - **`[[src/app.h#Greeter]]`** — the `Greeter` struct in a C header
 - **`[[src/app.h#Greeter#prefix]]`** — the `prefix` field of struct `Greeter` in C
 - **`[[src/app.dart#Greeter#greet]]`** — the `greet` method on class `Greeter` in Dart
+- **`[[src/schema.sql#users#email]]`** — the `email` column of table `users` in SQL
 
 **Path targets** (no `#` — any file or folder in the project):
 
@@ -51,7 +52,7 @@ Wiki links can point to any file or folder in the project, and — for supported
 - **`[[docs/CHANGELOG]]`** — a file with no extension
 - **`[[src/components]]`** — a folder
 
-`lat check` verifies path targets exist on disk and symbol targets resolve to a real definition. Symbol targets (`#`) are only supported for these extensions: `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.rs`, `.go`, `.c`, `.h`, `.dart`. Using `#` with any other extension (e.g. `[[schema.sql#foo]]`) is an error.
+`lat check` verifies path targets exist on disk and symbol targets resolve to a real definition. Symbol targets (`#`) are only supported for these extensions: `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.rs`, `.go`, `.c`, `.h`, `.dart`, `.sql`. Using `#` with any other extension is an error.
 
 Python symbols: functions, classes, methods, module-level variables. Decorated definitions (`@decorator`) are unwrapped transparently — `[[file.py#my_func]]` resolves whether or not `my_func` has decorators, and `# @lat:` comments placed between decorators and the `def`/`class` line are scanned normally.
 
@@ -63,7 +64,9 @@ C symbols: functions (including pointer-returning like `char *func()`), structs,
 
 Dart symbols: functions, classes, methods, mixins, enums, extensions, top-level variables. Methods are resolved inside the class body — `[[file.dart#Class#method]]` matches any method declaration inside `class Class { ... }`. Mixins are emitted as interface-kind symbols.
 
-Source code is parsed lazily with tree-sitter (via `web-tree-sitter`). Only files referenced by wiki links are parsed — no up-front scanning. [[cli#check#md]] validates that the file exists and the symbol is defined.
+SQL symbols: tables, views, indexes, functions, procedures, triggers, types, sequences, schemas (plus `EXTENSION`, `ROLE`, `DATABASE`). Extracted with a regex-based scanner — every top-level `CREATE [OR REPLACE] ...` declaration is emitted, with `CREATE TABLE` additionally exposing each column as a child symbol. Columns are resolved via the parent table — `[[file.sql#table#col]]` matches the `col` entry inside `CREATE TABLE table (...)`. Table constraints (`CONSTRAINT`, `PRIMARY KEY`, `FOREIGN KEY`, `UNIQUE`, `CHECK`, `EXCLUDE`, `LIKE`, `INDEX`, `KEY`) are ignored. Comments (`--`, `/* */`), single-quoted strings, and Postgres dollar-quoted bodies (`$$...$$`, `$tag$...$tag$`) are skipped so they don't confuse statement-end detection.
+
+Most source code is parsed lazily with tree-sitter (via `web-tree-sitter`); SQL uses regex pattern matching instead — see [[parser#Source Symbol Extraction]]. Only files referenced by wiki links are parsed — no up-front scanning. [[cli#check#md]] validates that the file exists and the symbol is defined.
 
 ### Strict vs Lenient Contexts
 
