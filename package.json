@@ -1,6 +1,6 @@
 {
   "name": "@elea.health/lat.md",
-  "version": "0.11.2",
+  "version": "0.11.3",
   "description": "A knowledge graph for your codebase, written in markdown",
   "type": "module",
   "packageManager": "pnpm@10.30.2",
