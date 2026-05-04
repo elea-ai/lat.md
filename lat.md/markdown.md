@@ -32,17 +32,26 @@ Resolution is handled by [[src/lattice.ts#resolveRef]]. See [[parser#Short Ref R
 
 ### Source Code Links
 
-Wiki links can reference symbols in TypeScript, JavaScript, Python, Rust, Go, and C source files:
+Wiki links can point to any file or folder in the project, and — for supported languages — to individual symbols within a source file.
+
+**Symbol targets** (use `#` to select a symbol inside a file):
 
 - **`[[src/config.ts#getConfigDir]]`** — the `getConfigDir` function in `src/config.ts`
-- **`[[src/server.ts#App#listen]]`** — the `listen` method on class `App` in `src/server.ts`
+- **`[[src/server.ts#App#listen]]`** — the `listen` method on class `App`
 - **`[[src/lib.rs#Greeter#greet]]`** — the `greet` method on struct `Greeter` in Rust
 - **`[[src/app.go#Greeter#Greet]]`** — the `Greet` method on type `Greeter` in Go
 - **`[[src/app.h#Greeter]]`** — the `Greeter` struct in a C header
 - **`[[src/app.h#Greeter#prefix]]`** — the `prefix` field of struct `Greeter` in C
-- **`[[src/config.ts]]`** — link to the file itself (no symbol)
+- **`[[src/app.dart#Greeter#greet]]`** — the `greet` method on class `Greeter` in Dart
 
-Supported extensions: `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.rs`, `.go`, `.c`, `.h`.
+**Path targets** (no `#` — any file or folder in the project):
+
+- **`[[src/config.ts]]`** — a source file, linked without picking a symbol
+- **`[[src/schema.sql]]`** — a file with any extension
+- **`[[docs/CHANGELOG]]`** — a file with no extension
+- **`[[src/components]]`** — a folder
+
+`lat check` verifies path targets exist on disk and symbol targets resolve to a real definition. Symbol targets (`#`) are only supported for these extensions: `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.rs`, `.go`, `.c`, `.h`, `.dart`. Using `#` with any other extension (e.g. `[[schema.sql#foo]]`) is an error.
 
 Python symbols: functions, classes, methods, module-level variables. Decorated definitions (`@decorator`) are unwrapped transparently — `[[file.py#my_func]]` resolves whether or not `my_func` has decorators, and `# @lat:` comments placed between decorators and the `def`/`class` line are scanned normally.
 
@@ -51,6 +60,8 @@ Rust symbols: functions, structs, enums, traits, impl methods, consts, statics, 
 Go symbols: functions, types (structs, interfaces, type aliases), methods (with receiver), consts, vars. Methods are resolved via receiver type — `[[file.go#Type#Method]]` matches `func (t *Type) Method()`.
 
 C symbols: functions (including pointer-returning like `char *func()`), structs, struct fields/members, enums, enum values (including anonymous enums and `typedef enum` members), typedefs, `#define` macros (both object-like and function-like), variables (including arrays). Struct fields are resolved via the parent struct — `[[file.h#Struct#field]]` matches any `field_declaration` inside `struct Struct { ... }`, including fields nested inside anonymous unions and structs. Enum values can be referenced standalone (`[[file.h#GREEN]]`) or qualified by their enum name (`[[file.h#Color#GREEN]]`); both forms work for named enums, `typedef enum`, and named `typedef enum`. Both `.c` and `.h` files are supported — include guards (`#ifndef`/`#endif`) are walked through transparently.
+
+Dart symbols: functions, classes, methods, mixins, enums, extensions, top-level variables. Methods are resolved inside the class body — `[[file.dart#Class#method]]` matches any method declaration inside `class Class { ... }`. Mixins are emitted as interface-kind symbols.
 
 Source code is parsed lazily with tree-sitter (via `web-tree-sitter`). Only files referenced by wiki links are parsed — no up-front scanning. [[cli#check#md]] validates that the file exists and the symbol is defined.
 

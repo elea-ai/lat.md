@@ -36,7 +36,7 @@ The `lat` CLI gives agents and humans a system to navigate and maintain the grap
 ## Install
 
 ```bash
-npm install -g lat.md
+npm install -g @elea.health/lat.md
 ```
 
 Then run `lat init` in the repo you want to use lat in.

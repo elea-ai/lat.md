@@ -390,6 +390,34 @@ describe('python-code-ref', () => {
   });
 });
 
+// --- dart-code-ref ---
+
+describe('dart-code-ref', () => {
+  it('scans @lat refs from Dart // comments including between annotations', async () => {
+    const { refs } = await scanCodeRefs(caseDir('dart-code-ref'));
+    expect(refs).toHaveLength(3);
+
+    expect(refs[0].target).toBe('Specs#Feature A');
+    expect(refs[0].file).toContain('app.dart');
+    expect(refs[0].line).toBe(1);
+
+    expect(refs[1].target).toBe('Specs#Feature B');
+    expect(refs[1].file).toContain('app.dart');
+    expect(refs[1].line).toBe(5);
+
+    expect(refs[2].target).toBe('Specs#Nonexistent');
+    expect(refs[2].line).toBe(8);
+  });
+
+  it('detects dangling @lat ref in Dart file', async () => {
+    const { errors, files } = await checkCodeRefs(latDir('dart-code-ref'));
+    expect(errors).toHaveLength(1);
+    expect(errors[0].target).toBe('Specs#Nonexistent');
+    expect(errors[0].message).toContain('no matching section found');
+    expect(files).toEqual({ '.dart': 1 });
+  });
+});
+
 // --- gitignore-filtering ---
 
 describe('gitignore-filtering', () => {
@@ -658,7 +686,7 @@ describe('error-bare-heading-ref', () => {
     const { errors } = await checkMd(lat);
     const bare = errors.find((e) => e.target === 'Installation');
     expect(bare).toBeDefined();
-    expect(bare!.message).toContain('no matching section found');
+    expect(bare!.message).toContain('not found');
   });
 
   // @lat: [[ref-resolution#Local section syntax in md is error]]
@@ -666,7 +694,7 @@ describe('error-bare-heading-ref', () => {
     const { errors } = await checkMd(lat);
     const local = errors.find((e) => e.target === '#Configuration');
     expect(local).toBeDefined();
-    expect(local!.message).toContain('no matching section found');
+    expect(local!.message).toContain('broken link');
   });
 
   // @lat: [[ref-resolution#Nonexistent file ref in md is error]]
@@ -900,6 +928,43 @@ describe('error-source-ref-go-missing', () => {
   });
 });
 
+describe('source-ref-dart-valid', () => {
+  it('resolves Dart function, class, method, mixin, enum, and variable refs without errors', async () => {
+    // docs.md links: greet (func), Greeter (class), Greeter#greet (method),
+    // createGreeter (func), Greeting (mixin), defaultName (var), Color (enum),
+    // DotShorthand (class using Dart 3.7 dot shorthand), DotShorthand#pick (method)
+    const { errors } = await checkMd(latDir('source-ref-dart-valid'));
+    expect(errors).toHaveLength(0);
+  });
+});
+
+describe('error-source-ref-dart-missing', () => {
+  it('check md reports all missing Dart symbols', async () => {
+    const { errors } = await checkMd(latDir('error-source-ref-dart-missing'));
+    expect(errors).toHaveLength(4);
+
+    const byTarget = new Map(errors.map((e) => [e.target, e]));
+
+    const fn = byTarget.get('src/app.dart#nonexistent')!;
+    expect(fn).toBeDefined();
+    expect(fn.message).toContain('symbol "nonexistent" not found');
+
+    const cls = byTarget.get('src/app.dart#MissingClass')!;
+    expect(cls).toBeDefined();
+    expect(cls.message).toContain('symbol "MissingClass" not found');
+
+    const cnst = byTarget.get('src/app.dart#MISSING_CONST')!;
+    expect(cnst).toBeDefined();
+    expect(cnst.message).toContain('symbol "MISSING_CONST" not found');
+
+    const method = byTarget.get('src/app.dart#Greeter#missingMethod')!;
+    expect(method).toBeDefined();
+    expect(method.message).toContain(
+      'symbol "Greeter#missingMethod" not found',
+    );
+  });
+});
+
 describe('source-ref-c-valid', () => {
   // @lat: [[tests/check-md#Passes with valid links#Passes with C enum value links]]
   it('resolves C function, struct, struct field, enum, typedef, define, variable, pointer-returning, and array refs without errors', async () => {
@@ -951,10 +1016,55 @@ describe('error-source-ref-unsupported-ext', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0].target).toBe('src/app.blah#spam');
     expect(errors[0].message).toContain('unsupported file extension ".blah"');
-    expect(errors[0].message).toContain('Supported:');
+    expect(errors[0].message).toContain('Symbol references (#) only supported for:');
     expect(errors[0].message).toContain('.ts');
     expect(errors[0].message).toContain('.rs');
     expect(errors[0].message).toContain('.go');
+  });
+});
+
+describe('source-ref-folder-valid', () => {
+  it('check md accepts wiki link to existing folder', async () => {
+    const { errors } = await checkMd(latDir('source-ref-folder-valid'));
+    expect(errors).toHaveLength(0);
+  });
+});
+
+describe('error-source-ref-bad-folder', () => {
+  it('check md reports broken link for nonexistent folder and folder with symbol ref', async () => {
+    const { errors } = await checkMd(latDir('error-source-ref-bad-folder'));
+    expect(errors).toHaveLength(2);
+    const byTarget = new Map(errors.map((e) => [e.target, e]));
+    expect(byTarget.get('src/nonexistent')!.message).toContain('file or folder "src/nonexistent" not found');
+    expect(byTarget.get('src/components#something')!.message).toContain('no matching section found');
+  });
+});
+
+describe('source-ref-unsupported-ext-valid', () => {
+  it('check md accepts wiki link to existing file with unsupported extension', async () => {
+    const { errors } = await checkMd(latDir('source-ref-unsupported-ext-valid'));
+    expect(errors).toHaveLength(0);
+  });
+});
+
+describe('source-ref-unsupported-ext-root-valid', () => {
+  it('check md accepts wiki link to root-level file with unsupported extension', async () => {
+    const { errors } = await checkMd(latDir('source-ref-unsupported-ext-root-valid'));
+    expect(errors).toHaveLength(0);
+  });
+});
+
+describe('error-source-ref-unsupported-ext-missing', () => {
+  it('check md reports broken link for missing unsupported-ext files and folders', async () => {
+    const { errors } = await checkMd(latDir('error-source-ref-unsupported-ext-missing'));
+    expect(errors).toHaveLength(3);
+    const targets = errors.map((e) => e.target);
+    expect(targets).toContain('nope.sql');
+    expect(targets).toContain('src/missing.sql');
+    expect(targets).toContain('src/missing/');
+    for (const e of errors) {
+      expect(e.message).toContain('not found');
+    }
   });
 });
 
