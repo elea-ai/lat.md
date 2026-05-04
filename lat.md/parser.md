@@ -43,3 +43,11 @@ Resolution is handled by [[src/lattice.ts#resolveRef]] for strict contexts (`lat
 ## Refs Extraction
 
 [[src/lattice.ts#extractRefs]] walks the AST for [[parser#Wiki Links#Wiki Link Node]] nodes and returns the target, enclosing section id, file, and line number.
+
+## Source Symbol Extraction
+
+Source symbols are resolved by [[src/source-parser.ts#parseSourceSymbols]]. Most languages use tree-sitter (via `web-tree-sitter`); SQL uses a regex-based scanner because no prebuilt WASM SQL grammar ships with the bundled set.
+
+The SQL scanner in [[src/source-parser.ts#extractSqlSymbols]] walks every top-level `CREATE [OR REPLACE] ...` declaration, captures the declared name (supporting `"quoted"`, `` `backtick` ``, `[bracket]`, and `schema.name` forms), and records the statement's line range. For `CREATE TABLE`, [[src/source-parser.ts#extractSqlTableColumns]] parses the parenthesized column list and emits each column as a child symbol parented to the table. Comments, single-quoted strings, and Postgres dollar-quoted bodies are skipped by [[src/source-parser.ts#skipSqlToken]] so their contents don't terminate statements or confuse paren balancing.
+
+`@lat:` code comments in SQL use the `--` line-comment prefix — [[src/code-refs.ts#LAT_REF_RE]] accepts any of `//`, `#`, or `--` before the marker.

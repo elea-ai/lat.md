@@ -1008,6 +1008,79 @@ describe('error-source-ref-c-missing', () => {
   });
 });
 
+describe('source-ref-sql-valid', () => {
+  it('resolves SQL table, column, view, index, function, and type refs without errors', async () => {
+    const { errors } = await checkMd(latDir('source-ref-sql-valid'));
+    expect(errors).toHaveLength(0);
+  });
+
+  it('scans -- @lat refs from SQL line comments', async () => {
+    const { refs } = await scanCodeRefs(caseDir('source-ref-sql-valid'));
+    const sqlRefs = refs.filter((r) => r.file.endsWith('.sql'));
+    expect(sqlRefs).toHaveLength(1);
+    expect(sqlRefs[0].target).toBe('docs#Docs');
+    expect(sqlRefs[0].line).toBe(1);
+  });
+
+  it('SQL: outgoingSourceRefs include endLine for table, column, view, function', async () => {
+    const ctx = testCtx('source-ref-sql-valid');
+    const result = await getSection(ctx, 'lat.md/docs#Docs');
+    expect(result.kind).toBe('found');
+    if (result.kind !== 'found') return;
+    const ref = (t: string) =>
+      result.outgoingSourceRefs.find((r) => r.target === t);
+    // CREATE TABLE users: lines 2-7
+    expect(ref('src/schema.sql#users')).toMatchObject({ line: 2, endLine: 7 });
+    // column email: line 4
+    expect(ref('src/schema.sql#users#email')).toMatchObject({
+      line: 4,
+      endLine: 4,
+    });
+    // CREATE INDEX: line 9
+    expect(ref('src/schema.sql#users_email_idx')).toMatchObject({
+      line: 9,
+      endLine: 9,
+    });
+    // CREATE OR REPLACE VIEW: lines 11-12
+    expect(ref('src/schema.sql#active_users')).toMatchObject({
+      line: 11,
+      endLine: 12,
+    });
+    // CREATE FUNCTION: lines 14-17
+    expect(ref('src/schema.sql#greet')).toMatchObject({
+      line: 14,
+      endLine: 17,
+    });
+    // CREATE TYPE: line 19
+    expect(ref('src/schema.sql#mood')).toMatchObject({ line: 19, endLine: 19 });
+  });
+});
+
+describe('error-source-ref-sql-missing', () => {
+  it('check md reports all missing SQL symbols', async () => {
+    const { errors } = await checkMd(latDir('error-source-ref-sql-missing'));
+    expect(errors).toHaveLength(4);
+
+    const byTarget = new Map(errors.map((e) => [e.target, e]));
+
+    const table = byTarget.get('src/schema.sql#nonexistent')!;
+    expect(table).toBeDefined();
+    expect(table.message).toContain('symbol "nonexistent" not found');
+
+    const col = byTarget.get('src/schema.sql#users#nonexistent')!;
+    expect(col).toBeDefined();
+    expect(col.message).toContain('symbol "users#nonexistent" not found');
+
+    const view = byTarget.get('src/schema.sql#missing_view')!;
+    expect(view).toBeDefined();
+    expect(view.message).toContain('symbol "missing_view" not found');
+
+    const fn = byTarget.get('src/schema.sql#missing_fn')!;
+    expect(fn).toBeDefined();
+    expect(fn.message).toContain('symbol "missing_fn" not found');
+  });
+});
+
 describe('error-source-ref-unsupported-ext', () => {
   it('check md reports unsupported extension with list of supported ones', async () => {
     const { errors } = await checkMd(

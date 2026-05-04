@@ -63,10 +63,16 @@ const grammarMap: Record<string, string> = {
   '.dart': 'tree-sitter-dart.wasm',
 };
 
-/** All source file extensions that lat can parse (derived from grammarMap). */
-export const SOURCE_EXTENSIONS: ReadonlySet<string> = new Set(
-  Object.keys(grammarMap),
-);
+/** Source file extensions parsed with regex instead of tree-sitter.
+ *  SQL symbol extraction uses line-oriented pattern matching on CREATE
+ *  statements rather than a full grammar. */
+const REGEX_EXTENSIONS: ReadonlySet<string> = new Set(['.sql']);
+
+/** All source file extensions that lat can parse. */
+export const SOURCE_EXTENSIONS: ReadonlySet<string> = new Set([
+  ...Object.keys(grammarMap),
+  ...REGEX_EXTENSIONS,
+]);
 
 async function getLanguage(ext: string): Promise<Language | null> {
   const wasmFile = grammarMap[ext];
@@ -996,11 +1002,237 @@ function firstLine(text: string): string {
   return nl === -1 ? text : text.slice(0, nl);
 }
 
+/**
+ * Build an offset → 1-based line number mapper for a string.
+ * Precomputes line starts so lookups are O(log n).
+ */
+function makeLineMapper(content: string): (offset: number) => number {
+  const lineStarts: number[] = [0];
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === '\n') lineStarts.push(i + 1);
+  }
+  return (off: number): number => {
+    let lo = 0;
+    let hi = lineStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (lineStarts[mid] <= off) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo + 1;
+  };
+}
+
+/**
+ * Advance past a SQL token that should be skipped during scanning:
+ * single-quoted strings, `--` line comments, `/* *\/` block comments, and
+ * Postgres dollar-quoted bodies (`$$...$$` or `$tag$...$tag$`).
+ * Returns the new index; callers should not increment further for the same char.
+ */
+function skipSqlToken(content: string, i: number): number | null {
+  const c = content[i];
+  const next = content[i + 1];
+  if (c === "'") {
+    let j = i + 1;
+    while (j < content.length && content[j] !== "'") j++;
+    // SQL escapes '' as a literal quote — consume the pair and continue.
+    while (
+      j < content.length - 1 &&
+      content[j] === "'" &&
+      content[j + 1] === "'"
+    ) {
+      j += 2;
+      while (j < content.length && content[j] !== "'") j++;
+    }
+    return j < content.length ? j + 1 : j;
+  }
+  if (c === '-' && next === '-') {
+    let j = i;
+    while (j < content.length && content[j] !== '\n') j++;
+    return j;
+  }
+  if (c === '/' && next === '*') {
+    let j = i + 2;
+    while (
+      j < content.length &&
+      !(content[j] === '*' && content[j + 1] === '/')
+    )
+      j++;
+    return j < content.length ? j + 2 : j;
+  }
+  if (c === '$') {
+    // Dollar-quoted string: $tag$ ... $tag$ (tag may be empty)
+    const tagMatch = /^\$([A-Za-z_]\w*)?\$/.exec(content.slice(i));
+    if (tagMatch) {
+      const tag = tagMatch[0];
+      const j = content.indexOf(tag, i + tag.length);
+      return j === -1 ? content.length : j + tag.length;
+    }
+  }
+  return null;
+}
+
+/** Find the offset of the next `;` outside parens/strings/comments. */
+function findSqlStatementEnd(content: string, start: number): number {
+  let depth = 0;
+  let i = start;
+  while (i < content.length) {
+    const skipped = skipSqlToken(content, i);
+    if (skipped !== null) {
+      i = skipped;
+      continue;
+    }
+    const c = content[i];
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === ';' && depth === 0) return i;
+    i++;
+  }
+  return content.length - 1;
+}
+
+/** Matches the start of a CREATE declaration and captures kind + name. */
+const SQL_CREATE_RE =
+  /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?(?:UNIQUE\s+)?(?:MATERIALIZED\s+)?(TABLE|VIEW|INDEX|FUNCTION|PROCEDURE|TRIGGER|TYPE|SCHEMA|SEQUENCE|EXTENSION|ROLE|DATABASE)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|(?:(?:[A-Za-z_]\w*|"[^"]+")\.)?([A-Za-z_]\w*))/gi;
+
+function sqlKind(keyword: string): SourceSymbol['kind'] {
+  switch (keyword.toUpperCase()) {
+    case 'FUNCTION':
+    case 'PROCEDURE':
+    case 'TRIGGER':
+      return 'function';
+    case 'TYPE':
+      return 'type';
+    case 'INDEX':
+      return 'const';
+    default:
+      return 'class';
+  }
+}
+
+/**
+ * Parse column definitions inside a `CREATE TABLE name (...)` body and emit
+ * each column as a `variable` symbol whose parent is the table name.
+ * Skips table constraints (CONSTRAINT, PRIMARY KEY, FOREIGN KEY, UNIQUE,
+ * CHECK, EXCLUDE, LIKE, INDEX, KEY).
+ */
+function extractSqlTableColumns(
+  content: string,
+  startOffset: number,
+  tableName: string,
+  symbols: SourceSymbol[],
+  offsetToLine: (off: number) => number,
+): void {
+  let i = startOffset;
+  while (i < content.length && content[i] !== '(') {
+    const skipped = skipSqlToken(content, i);
+    if (skipped !== null) {
+      i = skipped;
+      continue;
+    }
+    if (content[i] === ';') return;
+    i++;
+  }
+  if (i >= content.length) return;
+
+  let depth = 1;
+  i++;
+  let itemStart = i;
+  const items: Array<{ start: number; end: number }> = [];
+  while (i < content.length && depth > 0) {
+    const skipped = skipSqlToken(content, i);
+    if (skipped !== null) {
+      i = skipped;
+      continue;
+    }
+    const c = content[i];
+    if (c === '(') depth++;
+    else if (c === ')') {
+      depth--;
+      if (depth === 0) {
+        items.push({ start: itemStart, end: i });
+        break;
+      }
+    } else if (c === ',' && depth === 1) {
+      items.push({ start: itemStart, end: i });
+      itemStart = i + 1;
+    }
+    i++;
+  }
+
+  const reserved =
+    /^(?:CONSTRAINT|PRIMARY|FOREIGN|UNIQUE|CHECK|INDEX|KEY|EXCLUDE|LIKE|PERIOD)\b/i;
+  const nameRe = /^\s*(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_]\w*))/;
+
+  for (const item of items) {
+    const text = content.slice(item.start, item.end);
+    if (reserved.test(text.trimStart())) continue;
+    const m = nameRe.exec(text);
+    if (!m) continue;
+    const colName = m[1] ?? m[2] ?? m[3] ?? m[4];
+    if (!colName) continue;
+
+    let s = item.start;
+    while (s < item.end && /\s/.test(content[s])) s++;
+    let e = item.end - 1;
+    while (e > s && /\s/.test(content[e])) e--;
+
+    symbols.push({
+      name: colName,
+      kind: 'variable',
+      parent: tableName,
+      startLine: offsetToLine(s),
+      endLine: offsetToLine(e),
+      signature: firstLine(text.trim()),
+    });
+  }
+}
+
+function extractSqlSymbols(content: string): SourceSymbol[] {
+  const symbols: SourceSymbol[] = [];
+  const offsetToLine = makeLineMapper(content);
+  const lines = content.split('\n');
+
+  SQL_CREATE_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = SQL_CREATE_RE.exec(content)) !== null) {
+    const name = m[2] ?? m[3] ?? m[4] ?? m[5];
+    if (!name) continue;
+
+    const startLine = offsetToLine(m.index);
+    const endOffset = findSqlStatementEnd(content, m.index + m[0].length);
+    const endLine = offsetToLine(endOffset);
+
+    symbols.push({
+      name,
+      kind: sqlKind(m[1]),
+      startLine,
+      endLine,
+      signature: firstLine(lines[startLine - 1] ?? m[0]),
+    });
+
+    if (m[1].toUpperCase() === 'TABLE') {
+      extractSqlTableColumns(
+        content,
+        m.index + m[0].length,
+        name,
+        symbols,
+        offsetToLine,
+      );
+    }
+  }
+
+  return symbols;
+}
+
 export async function parseSourceSymbols(
   filePath: string,
   content: string,
 ): Promise<SourceSymbol[]> {
   const ext = filePath.match(/\.[^.]+$/)?.[0] ?? '';
+  if (ext === '.sql') {
+    return extractSqlSymbols(content);
+  }
   const lang = await getLanguage(ext);
   if (!lang) return [];
 

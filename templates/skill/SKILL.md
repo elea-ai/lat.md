@@ -85,8 +85,11 @@ Reference functions, classes, constants, and methods in source files:
 [[src/lib.rs#Greeter#greet]]            — Rust impl method
 [[src/app.go#Greeter#Greet]]            — Go method
 [[src/app.h#Greeter]]                   — C struct
+[[src/app.dart#Greeter#greet]]          — Dart method
+[[src/schema.sql#users]]                — SQL table
+[[src/schema.sql#users#email]]          — SQL column
 [[src/components]]                      — folder (existence check)
-[[schema.sql]]                          — any file extension (existence check)
+[[docs/CHANGELOG]]                      — any file (existence check)
 ```
 
 Symbol references (`#`) only work for supported extensions. File-only and folder links work with any path. `lat check` validates that all targets exist.
@@ -106,7 +109,12 @@ def init():
     ...
 ```
 
-Supported comment styles: `//` (JS/TS/Rust/Go/C) and `#` (Python).
+```sql
+-- @lat: [[cli#init]]
+CREATE TABLE foo (...);
+```
+
+Supported comment styles: `//` (JS/TS/Rust/Go/C/Dart), `#` (Python), and `--` (SQL).
 
 Place one `@lat:` comment per section, at the relevant code — not at the top of the file.
 
