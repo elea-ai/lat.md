@@ -238,7 +238,7 @@ program
   .description('Start the MCP server (stdio transport)')
   .action(async () => {
     const { startMcpServer } = await import('../mcp/server.js');
-    await startMcpServer();
+    await startMcpServer(program.opts().dir);
   });
 
 program

@@ -16,8 +16,8 @@ function toMcp(result: CmdResult) {
   return result.isError ? { content, isError: true } : { content };
 }
 
-export async function startMcpServer(): Promise<void> {
-  const latDir = findLatticeDir();
+export async function startMcpServer(from?: string): Promise<void> {
+  const latDir = findLatticeDir(from);
   if (!latDir) {
     process.stderr.write('No lat.md directory found\n');
     process.exit(1);
