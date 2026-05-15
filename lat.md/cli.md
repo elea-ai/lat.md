@@ -294,7 +294,7 @@ Clients invoke this as `lat mcp`. The `lat init` wizard registers the MCP server
 - **lat_check** — validate links and code refs (wraps [[cli#check]])
 - **lat_refs** — find references to a section (wraps [[cli#refs]])
 
-Each MCP tool calls the same command function as the CLI (e.g. `locateCommand`, `refsCommand`, `searchCommand`), passing a `CmdContext` with `plainStyler` and `mode: 'mcp'`. The `toMcp()` helper converts `CmdResult` to MCP response format. Uses `@modelcontextprotocol/sdk` with stdio transport. Resolves `lat.md/` from cwd.
+Each MCP tool calls the same command function as the CLI (e.g. `locateCommand`, `refsCommand`, `searchCommand`), passing a `CmdContext` with `plainStyler` and `mode: 'mcp'`. The `toMcp()` helper converts `CmdResult` to MCP response format. Uses `@modelcontextprotocol/sdk` with stdio transport. Honors the global `--dir` option (forwarded to [[src/mcp/server.ts#startMcpServer]] and on to `findLatticeDir`), so `lat --dir /path/to/project mcp` serves a vault other than the spawn cwd; falls back to cwd traversal when omitted.
 
 Implementation: [[src/mcp/server.ts]]
 
