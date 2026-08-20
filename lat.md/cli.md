@@ -355,6 +355,8 @@ Content freshness is tracked via SHA-256 hashes. On each run:
 3. Only re-embed new or changed sections (saves API cost)
 4. Delete DB rows for sections that no longer exist
 
+Each batch planned by [[src/search/embeddings.ts#planBatches]] is written to the DB before the next request goes out. A failing request therefore costs only the batches not yet embedded — the following run resumes from those instead of re-embedding the whole corpus.
+
 On first run, automatically indexes all sections. The `--reindex` flag forces a full rebuild.
 
 Implementation: [[src/search/index.ts]]

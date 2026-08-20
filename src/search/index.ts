@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Client } from '@libsql/client';
 import { loadAllSections, flattenSections, type Section } from '../lattice.js';
-import { embed } from './embeddings.js';
+import { embed, planBatches } from './embeddings.js';
 import type { EmbeddingProvider } from './provider.js';
 
 function hashContent(text: string): string {
@@ -69,22 +69,37 @@ export async function indexSections(
 
   const toDelete = [...existing.keys()].filter((id) => !current.has(id));
 
-  // Embed new/changed sections
+  // Embed new/changed sections, persisting each batch before requesting the
+  // next one: a failed request keeps the vectors already written, so the next
+  // run only has to embed what is still missing instead of starting over.
   if (toEmbed.length > 0) {
-    const texts = toEmbed.map((e) => e.content);
-    const vectors = await embed(texts, provider, key);
     const now = Date.now();
+    let offset = 0;
 
-    for (let i = 0; i < toEmbed.length; i++) {
-      const { id, content, section } = toEmbed[i];
-      const hash = current.get(id)!.hash;
-      const vecJson = JSON.stringify(vectors[i]);
+    for (const batch of planBatches(toEmbed.map((e) => e.content))) {
+      const vectors = await embed(batch, provider, key);
 
-      await db.execute({
-        sql: `INSERT OR REPLACE INTO sections (id, file, heading, content, content_hash, embedding, updated_at)
-              VALUES (?, ?, ?, ?, ?, vector(?), ?)`,
-        args: [id, section.file, section.heading, content, hash, vecJson, now],
-      });
+      for (let i = 0; i < batch.length; i++) {
+        const { id, content, section } = toEmbed[offset + i];
+        const hash = current.get(id)!.hash;
+        const vecJson = JSON.stringify(vectors[i]);
+
+        await db.execute({
+          sql: `INSERT OR REPLACE INTO sections (id, file, heading, content, content_hash, embedding, updated_at)
+                VALUES (?, ?, ?, ?, ?, vector(?), ?)`,
+          args: [
+            id,
+            section.file,
+            section.heading,
+            content,
+            hash,
+            vecJson,
+            now,
+          ],
+        });
+      }
+
+      offset += batch.length;
     }
   }
 

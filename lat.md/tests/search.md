@@ -41,3 +41,17 @@ Re-index unchanged content, verify all sections reported as unchanged with zero 
 ### Detects deleted sections when file is removed
 
 Remove `testing.md`, re-index, verify 4 sections removed and 5 architecture sections remain.
+
+## Index Persistence
+
+Tests that a partially failed index keeps the batches it already wrote, using a stub embeddings endpoint instead of the replay server.
+
+The fixture sections are sized so [[src/search/embeddings.ts#planBatches]] has to spread them over several requests; the stub then fails a chosen request to simulate an API error mid-index.
+
+### Keeps batches written before a failure
+
+Fail the second embedding request, verify the error propagates and the first batch's section is still in the DB.
+
+### Resumes from the sections still missing
+
+Re-index after the failure with a healthy stub, verify only the two unembedded sections are added and the one already stored counts as unchanged.
